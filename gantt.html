@@ -1,0 +1,1684 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>統合WBS & ガントチャート</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* カスタムスタイル */
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+
+        .table-scroll {
+            overflow-x: auto;
+            overflow-y: auto;
+        }
+
+        /* WBS テーブル */
+        .wbs-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            border-top: 0px solid #e5e7eb;
+            /* テーブル自体の枠線はもともと細いorなし */
+            border-right: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+            border-left: 1px solid #e5e7eb;
+        }
+
+        /* 共通セル */
+        .wbs-table th,
+        .wbs-table td {
+            padding: 4px 6px;
+            white-space: nowrap;
+            background-clip: padding-box;
+            /* ★デフォルトの罫線色 */
+            border-bottom: 1px solid #e5e7eb;
+            border-right: 1px solid #e5e7eb;
+            font-size: 0.8rem;
+            /* 罫線色の変更をスムーズにするため（任意） */
+            transition: border-top-color 0.1s ease-out, border-bottom-color 0.1s ease-out;
+        }
+
+        /* 最下行／最右列の不要な枠線を消す */
+        .wbs-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* ↓↓↓ 最下行のセルは下罫線がないので、下インジケータが効くように調整 */
+        .wbs-table tr:last-child td.drag-over-indicator-cell-bottom {
+            border-bottom: 1px solid #3b82f6 !important;
+            /* 強調色で罫線を引く */
+        }
+
+
+        .wbs-table td:last-child,
+        .wbs-table th:last-child {
+            border-right: none;
+        }
+
+        /* ヘッダー */
+        .wbs-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background-color: #f9fafb;
+            font-size: 0.75rem;
+            text-align: left;
+            border-top: 1px solid #e5e7eb;
+            /* ヘッダー下部の罫線色も変更対象にする */
+            transition: border-bottom-color 0.1s ease-out;
+        }
+
+        /* ヘッダーセルに対するインジケータ（必要なら） */
+        .wbs-table thead th.drag-over-indicator-cell-top {
+            border-top-color: #3b82f6 !important;
+        }
+
+        .wbs-table thead th.drag-over-indicator-cell-bottom {
+            border-bottom-color: #3b82f6 !important;
+        }
+
+        .wbs-table td input[type="text"],
+        .wbs-table td input[type="date"],
+        .wbs-table td input[type="number"],
+        .wbs-table td select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 2px 4px;
+            font-size: 0.8rem;
+            /* border: 1px solid #d1d5db; */
+            border-radius: 2px;
+        }
+
+        .wbs-table td input[type="checkbox"] {
+            margin: 0 auto;
+            display: block;
+        }
+
+        .wbs-table td.select-cell {
+            width: 24px;
+            text-align: center;
+        }
+
+        .wbs-table td.drag-cell {
+            width: 24px;
+            text-align: center;
+            cursor: move;
+        }
+
+        .wbs-table td.drag-cell::after {
+            content: '☰';
+            font-size: 16px;
+            color: #6b7280;
+        }
+
+        #actionBar {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        #actionBar button {
+            background: #3b82f6;
+            color: white;
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+
+        #actionBar button:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        #actionBar button:disabled {
+            background-color: #9ca3af;
+            color: #e5e7eb;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .dragging {
+            opacity: 0.6;
+            background: #f0f8ff;
+        }
+
+        .drag-over-indicator-top {
+            border-top: 3px solid #3b82f6 !important;
+        }
+
+        .wbs-table tr td.drag-over-indicator-cell-top,
+        .wbs-table thead th.drag-over-indicator-cell-top {
+            /* thead のセルも対象にする場合 */
+            /* 罫線の太さは変えず、色だけ変更 */
+            border-top-color: #3b82f6 !important;
+            /* 強調色 */
+        }
+
+        .wbs-table tr td.drag-over-indicator-cell-bottom,
+        .wbs-table thead th.drag-over-indicator-cell-bottom {
+            /* thead のセルも対象にする場合 */
+            /* 罫線の太さは変えず、色だけ変更 */
+            border-bottom-color: #3b82f6 !important;
+            /* 強調色 */
+            /* 最下行以外の下線インジケータ用 */
+        }
+
+        .drag-over-indicator-bottom {
+            border-bottom: 3px solid #3b82f6 !important;
+        }
+
+        input[type="date"] {
+            color: white;
+            /* 値なし（初期／空）のときの色 */
+            background-color: transparent;
+        }
+
+        input[type="date"].has-value {
+            color: black;
+            /* 値ありのときの色 */
+        }
+
+        input[type="date"]:focus {
+            color: black;
+            /* フォーカス中は常に見やすい黒 */
+        }
+
+        .task-bar-group {
+            cursor: move;
+        }
+
+        .task-bar-planned {
+            fill: #3b82f6;
+            opacity: 0.7;
+            stroke: #1e40af;
+            stroke-width: 1;
+        }
+
+        .task-bar-actual {
+            fill: #ef4444;
+            opacity: 0.7;
+            stroke: #991b1b;
+            stroke-width: 1;
+        }
+
+        .task-bar-progress {
+            fill: #10b981;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .task-label {
+            font-size: 10px;
+            fill: white;
+            pointer-events: none;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+
+        .resize-handle {
+            fill: rgba(0, 0, 0, 0.1);
+            stroke: rgba(0, 0, 0, 0.3);
+            stroke-width: 1;
+            cursor: ew-resize;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="bg-gray-100 text-gray-800 p-4 h-screen flex flex-col">
+
+    <div class="container mx-auto max-w-full space-y-4 flex flex-col flex-1 min-h-0">
+        <header class="bg-white shadow rounded-lg p-4 flex justify-between items-center flex-shrink-0">
+            <h1 class="text-2xl font-bold text-blue-600">統合WBS & ガントチャート</h1>
+        </header>
+
+        <div class="flex flex-col xl:flex-row gap-4 flex-1 min-h-0">
+            <div class="xl:w-2/5 bg-white shadow rounded-lg overflow-x-auto">
+                <!-- <div class="xl:w-full bg-white shadow rounded-lg p-4 flex flex-col flex-1 min-h-0"> -->
+                <div id="actionBar" class="flex-shrink-0">
+                    <button id="addRowBelow">下に行を追加</button>
+                    <button id="deleteSelected">削除</button>
+                    <button id="demoteSelected">項番を落とす</button>
+                    <button id="promoteSelected">項番を上げる</button>
+                    <button id="toggleSimpleView">簡易表示</button>
+                </div>
+                <div class="table-scroll flex-1 min-h-0">
+                    <table class="min-w-full wbs-table">
+                        <thead>
+                        </thead>
+                        <tbody id="wbsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="xl:w-3/5 bg-white shadow rounded-lg p-1 md:p-2 gantt-chart-area" id="ganttChartContainer">
+                <svg id="ganttSvg" class="gantt-svg">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"
+                            markerUnits="strokeWidth">
+                            <path d="M0,0 L8,3 L0,6 Z" fill="#6b7280" />
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+        </div>
+    </div>
+
+    <script type="application/json" id="taskData">
+    [
+        { "id": 1, "level": 1, "name": "プロジェクト計画", "isInternalTask": false, "output": "計画書 v1.0", "remarks": "初期ドラフト完了", "plannedStart": "2025-05-01", "plannedEnd": "2025-05-05", "actualStart": "2025-05-01", "actualEnd": "2025-05-04", "progress": 100, "dependencies": [], "owner": "担当A", "group": "計画チーム" },
+        { "id": 2, "level": 2, "name": "要件定義", "isInternalTask": false, "output": "要件定義書", "remarks": "", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-15", "actualStart": "2025-05-07", "actualEnd": "2025-05-18", "progress": 80, "dependencies": [1], "owner": "担当B", "group": "開発チーム" },
+        { "id": 3, "level": 3, "name": "ヒアリング実施", "isInternalTask": true, "output": "議事録", "remarks": "顧客A, B", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-09", "actualStart": "2025-05-07", "actualEnd": "2025-05-10", "progress": 100, "dependencies": [2], "owner": "担当B", "group": "開発チーム" },
+        { "id": 4, "level": 2, "name": "設計", "isInternalTask": false, "output": "設計書ドラフト", "remarks": "基本設計先行", "plannedStart": "2025-05-16", "plannedEnd": "2025-05-25", "actualStart": "", "actualEnd": "", "progress": 30, "dependencies": [2], "owner": "担当C", "group": "設計チーム" },
+        { "id": 5, "level": 1, "name": "実装", "isInternalTask": false, "output": "", "remarks": "", "plannedStart": "2025-05-26", "plannedEnd": "2025-06-20", "actualStart": "", "actualEnd": "", "progress": 0, "dependencies": [4], "owner": "担当D", "group": "開発チーム" },
+        { "id": 6, "level": 1, "name": "プロジェクト計画", "isInternalTask": false, "output": "計画書 v1.0", "remarks": "初期ドラフト完了", "plannedStart": "2025-05-01", "plannedEnd": "2025-05-05", "actualStart": "2025-05-01", "actualEnd": "2025-05-04", "progress": 100, "dependencies": [], "owner": "担当A", "group": "計画チーム" },
+        { "id": 7, "level": 2, "name": "要件定義", "isInternalTask": false, "output": "要件定義書", "remarks": "", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-15", "actualStart": "2025-05-07", "actualEnd": "2025-05-18", "progress": 80, "dependencies": [1], "owner": "担当B", "group": "開発チーム" },
+        { "id": 8, "level": 3, "name": "ヒアリング実施", "isInternalTask": true, "output": "議事録", "remarks": "顧客A, B", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-09", "actualStart": "2025-05-07", "actualEnd": "2025-05-10", "progress": 100, "dependencies": [2], "owner": "担当B", "group": "開発チーム" },
+        { "id": 9, "level": 2, "name": "設計", "isInternalTask": false, "output": "設計書ドラフト", "remarks": "基本設計先行", "plannedStart": "2025-05-16", "plannedEnd": "2025-05-25", "actualStart": "", "actualEnd": "", "progress": 30, "dependencies": [2], "owner": "担当C", "group": "設計チーム" },
+        { "id": 10, "level": 1, "name": "実装", "isInternalTask": false, "output": "", "remarks": "", "plannedStart": "2025-05-26", "plannedEnd": "2025-06-20", "actualStart": "", "actualEnd": "", "progress": 0, "dependencies": [4], "owner": "担当D", "group": "開発チーム" },
+        { "id": 11, "level": 1, "name": "プロジェクト計画", "isInternalTask": false, "output": "計画書 v1.0", "remarks": "初期ドラフト完了", "plannedStart": "2025-05-01", "plannedEnd": "2025-05-05", "actualStart": "2025-05-01", "actualEnd": "2025-05-04", "progress": 100, "dependencies": [], "owner": "担当A", "group": "計画チーム" },
+        { "id": 12, "level": 2, "name": "要件定義", "isInternalTask": false, "output": "要件定義書", "remarks": "", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-15", "actualStart": "2025-05-07", "actualEnd": "2025-05-18", "progress": 80, "dependencies": [1], "owner": "担当B", "group": "開発チーム" },
+        { "id": 13, "level": 3, "name": "ヒアリング実施", "isInternalTask": true, "output": "議事録", "remarks": "顧客A, B", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-09", "actualStart": "2025-05-07", "actualEnd": "2025-05-10", "progress": 100, "dependencies": [2], "owner": "担当B", "group": "開発チーム" },
+        { "id": 14, "level": 2, "name": "設計", "isInternalTask": false, "output": "設計書ドラフト", "remarks": "基本設計先行", "plannedStart": "2025-05-16", "plannedEnd": "2025-05-25", "actualStart": "", "actualEnd": "", "progress": 30, "dependencies": [2], "owner": "担当C", "group": "設計チーム" },
+        { "id": 15, "level": 1, "name": "実装", "isInternalTask": false, "output": "", "remarks": "", "plannedStart": "2025-05-26", "plannedEnd": "2025-06-20", "actualStart": "", "actualEnd": "", "progress": 0, "dependencies": [4], "owner": "担当D", "group": "開発チーム" },
+        { "id": 16, "level": 1, "name": "プロジェクト計画", "isInternalTask": false, "output": "計画書 v1.0", "remarks": "初期ドラフト完了", "plannedStart": "2025-05-01", "plannedEnd": "2025-05-05", "actualStart": "2025-05-01", "actualEnd": "2025-05-04", "progress": 100, "dependencies": [], "owner": "担当A", "group": "計画チーム" },
+        { "id": 17, "level": 2, "name": "要件定義", "isInternalTask": false, "output": "要件定義書", "remarks": "", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-15", "actualStart": "2025-05-07", "actualEnd": "2025-05-18", "progress": 80, "dependencies": [1], "owner": "担当B", "group": "開発チーム" },
+        { "id": 18, "level": 3, "name": "ヒアリング実施", "isInternalTask": true, "output": "議事録", "remarks": "顧客A, B", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-09", "actualStart": "2025-05-07", "actualEnd": "2025-05-10", "progress": 100, "dependencies": [2], "owner": "担当B", "group": "開発チーム" },
+        { "id": 19, "level": 2, "name": "設計", "isInternalTask": false, "output": "設計書ドラフト", "remarks": "基本設計先行", "plannedStart": "2025-05-16", "plannedEnd": "2025-05-25", "actualStart": "", "actualEnd": "", "progress": 30, "dependencies": [2], "owner": "担当C", "group": "設計チーム" },
+        { "id": 20, "level": 1, "name": "実装", "isInternalTask": false, "output": "", "remarks": "", "plannedStart": "2025-05-26", "plannedEnd": "2025-06-20", "actualStart": "", "actualEnd": "", "progress": 0, "dependencies": [4], "owner": "担当D", "group": "開発チーム" },
+        { "id": 21, "level": 1, "name": "プロジェクト計画", "isInternalTask": false, "output": "計画書 v1.0", "remarks": "初期ドラフト完了", "plannedStart": "2025-05-01", "plannedEnd": "2025-05-05", "actualStart": "2025-05-01", "actualEnd": "2025-05-04", "progress": 100, "dependencies": [], "owner": "担当A", "group": "計画チーム" },
+        { "id": 22, "level": 2, "name": "要件定義", "isInternalTask": false, "output": "要件定義書", "remarks": "", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-15", "actualStart": "2025-05-07", "actualEnd": "2025-05-18", "progress": 80, "dependencies": [1], "owner": "担当B", "group": "開発チーム" },
+        { "id": 23, "level": 3, "name": "ヒアリング実施", "isInternalTask": true, "output": "議事録", "remarks": "顧客A, B", "plannedStart": "2025-05-06", "plannedEnd": "2025-05-09", "actualStart": "2025-05-07", "actualEnd": "2025-05-10", "progress": 100, "dependencies": [2], "owner": "担当B", "group": "開発チーム" },
+        { "id": 24, "level": 2, "name": "設計", "isInternalTask": false, "output": "設計書ドラフト", "remarks": "基本設計先行", "plannedStart": "2025-05-16", "plannedEnd": "2025-05-25", "actualStart": "", "actualEnd": "", "progress": 30, "dependencies": [2], "owner": "担当C", "group": "設計チーム" },
+        { "id": 25, "level": 1, "name": "実装", "isInternalTask": false, "output": "", "remarks": "", "plannedStart": "2025-05-26", "plannedEnd": "2025-06-20", "actualStart": "", "actualEnd": "", "progress": 0, "dependencies": [4], "owner": "担当D", "group": "開発チーム" }
+    ]
+    </script>
+
+    <script>
+        let tasks = [], nextTaskId = 1;
+        const wbsTableBody = document.getElementById('wbsTableBody');
+        const selectedTaskIds = new Set();
+
+        let draggedItemId = null;
+        let lastDragOverRow = null;
+        const MAX_WBS_LEVEL = 10;
+        let isSimpleView = false;
+
+        const groupOptions = ['計画チーム', '開発チーム', '設計チーム', '営業チーム', 'テストチーム', 'インフラチーム', 'その他', ''];
+        const ownerOptions = ['担当A', '担当B', '担当C', '担当D', '担当E', '担当F', ''];
+
+        let columnDisplaySettings;
+
+        function initializeColumnDisplaySettings() {
+            const savedSettings = null;
+            if (savedSettings) {
+                columnDisplaySettings = JSON.parse(savedSettings);
+            } else {
+                columnDisplaySettings = {
+                    allColumns: [
+                        { key: "select", defaultHeaderText: "", type: "special", thClass: "w-6", tdClass: "select-cell" },
+                        { key: "drag", defaultHeaderText: "", type: "special", thClass: "w-6", tdClass: "drag-cell" },
+                        { key: "no", defaultHeaderText: "No.", type: "special", thClass: "w-10" },
+                        { key: "wbsId", defaultHeaderText: "項番", type: "special", thClass: "w-20" },
+                        { key: "name", defaultHeaderText: "項目名", type: "text", thClass: "min-w-[200px]", indent: true },
+                        { key: "isInternalTask", defaultHeaderText: "内部", type: "checkbox", thClass: "w-16" },
+                        { key: "plannedStart", defaultHeaderText: "予定開始", type: "date", thClass: "w-28" },
+                        { key: "plannedEnd", defaultHeaderText: "予定終了", type: "date", thClass: "w-28" },
+                        { key: "actualStart", defaultHeaderText: "実績開始", type: "date", thClass: "w-28" },
+                        { key: "actualEnd", defaultHeaderText: "実績終了", type: "date", thClass: "w-28" },
+                        { key: "status", defaultHeaderText: "ステータス", type: "display", getValue: calculateStatus, thClass: "w-24" },
+                        { key: "progress", defaultHeaderText: "進捗(%)", type: "number", thClass: "w-20", min: 0, max: 100, step: 10 },
+                        { key: "output", defaultHeaderText: "成果物", type: "text", thClass: "min-w-[200px]" },
+                        { key: "group", defaultHeaderText: "担当チーム", type: "select", options: groupOptions, thClass: "min-w-[120px]" },
+                        { key: "owner", defaultHeaderText: "主担当", type: "select", options: ownerOptions, thClass: "min-w-[120px]" },
+                        { key: "dependencies", defaultHeaderText: "依存先ID", type: "text", thClass: "min-w-[100px]" },
+                        { key: "remarks", defaultHeaderText: "備考", type: "text", thClass: "min-w-[200px]" }
+                    ],
+                    normalView: {
+                        columns: [
+                            { key: "select", visible: true },
+                            { key: "drag", visible: true },
+                            { key: "no", visible: true },
+                            { key: "wbsId", visible: true },
+                            { key: "name", visible: true },
+                            { key: "isInternalTask", visible: true },
+                            { key: "plannedStart", visible: true },
+                            { key: "plannedEnd", visible: true },
+                            { key: "actualStart", visible: true },
+                            { key: "actualEnd", visible: true },
+                            { key: "status", visible: true },
+                            { key: "progress", visible: true },
+                            { key: "output", visible: true },
+                            { key: "group", visible: true },
+                            { key: "owner", visible: true },
+                            { key: "dependencies", visible: true },
+                            { key: "remarks", visible: true }
+                        ]
+                    },
+                    simpleView: {
+                        columns: [
+                            { key: "select", visible: true },
+                            { key: "drag", visible: true },
+                            { key: "no", visible: true },
+                            { key: "wbsId", visible: true },
+                            { key: "name", visible: true },
+                            { key: "isInternalTask", visible: true },
+                            { key: "status", visible: true },
+                            { key: "progress", visible: true },
+                            { key: "group", visible: true },
+                            { key: "owner", visible: true }
+                        ]
+                    }
+                };
+            }
+        }
+
+        function getMasterColumnDef(key) {
+            return columnDisplaySettings.allColumns.find(c => c.key === key);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeColumnDisplaySettings();
+            loadInitialTasks();
+            renderAll();
+            setupEventListeners();
+            // adjustStickyHeaderTop(); // 必要に応じて初期ロード時にも呼ぶ
+        });
+
+        function setupEventListeners() {
+            document.getElementById('deleteSelected').addEventListener('click', deleteSelectedTasks);
+            document.getElementById('demoteSelected').addEventListener('click', demoteSelectedTasks);
+            document.getElementById('promoteSelected').addEventListener('click', promoteSelectedTasks);
+            document.getElementById('addRowBelow').addEventListener('click', handleAddRowBelow);
+            const toggleSimpleViewBtn = document.getElementById('toggleSimpleView');
+            toggleSimpleViewBtn.addEventListener('click', () => {
+                isSimpleView = !isSimpleView;
+                toggleSimpleViewBtn.textContent = isSimpleView ? '通常表示' : '簡易表示';
+                renderAll();
+            });
+            // window.addEventListener('resize', adjustStickyHeaderTop); // 必要ならリサイズ対応
+        }
+
+        // アクションバーの高さに基づいてテーブルヘッダーのtopを調整する関数 (オプション)
+        // function adjustStickyHeaderTop() {
+        //     const actionBar = document.getElementById('actionBar');
+        //     if (actionBar) {
+        //         const actionBarHeight = actionBar.offsetHeight;
+        //         const thElements = document.querySelectorAll('.wbs-table thead th');
+        //         thElements.forEach(th => {
+        //             th.style.top = `${actionBarHeight}px`;
+        //         });
+        //     }
+        // }
+
+        function loadInitialTasks() {
+            try {
+                const rawTasks = JSON.parse(document.getElementById('taskData').textContent);
+                tasks = rawTasks.map(t => ({
+                    ...t,
+                    level: t.level || 1,
+                    dependencies: typeof t.dependencies === 'string' ? t.dependencies.split(',').map(d => +d.trim()).filter(d => !isNaN(d)) : (Array.isArray(t.dependencies) ? t.dependencies : []),
+                    isInternalTask: t.isInternalTask === undefined ? false : !!t.isInternalTask,
+                    output: t.output || '',
+                    remarks: t.remarks || '',
+                    group: t.group || '未定',
+                    owner: t.owner || '未定'
+                }));
+                updateNextTaskId();
+            } catch (e) {
+                console.error("Failed to load initial tasks:", e);
+                tasks = [];
+            }
+        }
+        function updateNextTaskId() {
+            nextTaskId = tasks.length ? Math.max(...tasks.map(t => t.id)) + 1 : 1;
+        }
+        function regenerateWbsIds() {
+            const currentCounters = [];
+            for (const task of tasks) {
+                if (!task.level || task.level < 1) {
+                    task.level = 1;
+                }
+                task.level = Math.min(task.level, MAX_WBS_LEVEL);
+                while (currentCounters.length < task.level) {
+                    currentCounters.push(0);
+                }
+                currentCounters[task.level - 1]++;
+                for (let i = task.level; i < currentCounters.length; i++) {
+                    currentCounters[i] = 0;
+                }
+                task.wbsId = currentCounters.slice(0, task.level).join('.');
+            }
+        }
+
+        function calculateStatus(task) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            if (!task.plannedEnd) return "期日未設定";
+            const plannedEnd = new Date(task.plannedEnd);
+            if (isNaN(plannedEnd.getTime())) return "期日無効";
+
+            let statusText = "";
+            if (task.actualEnd) {
+                const actualEnd = new Date(task.actualEnd);
+                if (isNaN(actualEnd.getTime())) return "実績日無効";
+
+                if (actualEnd > plannedEnd) {
+                    const delayDays = Math.ceil((actualEnd - plannedEnd) / (1000 * 60 * 60 * 24));
+                    statusText = `${delayDays}日遅れ`;
+                } else if (actualEnd < plannedEnd) {
+                    const aheadDays = Math.ceil((plannedEnd - actualEnd) / (1000 * 60 * 60 * 24));
+                    statusText = `${aheadDays}日前倒`;
+                } else {
+                    statusText = "予定通り完了";
+                }
+            } else {
+                if (task.progress === 100) {
+                    statusText = "完了(日付未入力)";
+                } else if (today > plannedEnd) {
+                    const delayDays = Math.ceil((today - plannedEnd) / (1000 * 60 * 60 * 24));
+                    statusText = `${delayDays}日遅延中`;
+                } else {
+                    statusText = "進行中";
+                }
+            }
+            return statusText;
+        }
+
+        /**
+         * WBSテーブル全体を再描画します。
+         * ヘッダー、各タスク行、およびセル内容を現在のタスクデータと表示設定に基づいて生成します。
+         * また、行のドラッグアンドドロップ機能に関連するイベントリスナーも設定します。
+         */
+        function renderWbsTable() {
+            // adjustStickyHeaderTop(); // アクションバーの高さに基づいてテーブルヘッダーのtop位置を動的に調整する場合に呼び出します（現在はコメントアウト）。
+
+            // 現在の表示モード（簡易表示または通常表示）に応じて、表示する列の設定を取得します。
+            const currentViewSettings = isSimpleView ? columnDisplaySettings.simpleView : columnDisplaySettings.normalView;
+
+            // WBSテーブルのthead要素を取得します。
+            const tableHead = document.querySelector('.wbs-table thead');
+            // テーブルヘッダーの内容を一旦空にします（再描画のため）。
+            tableHead.innerHTML = '';
+            // ヘッダー行（tr要素）をtheadに追加します。
+            const trHead = tableHead.insertRow();
+
+            // 現在のビュー設定で定義されている各列に対して処理を行います（テーブルヘッダーの生成）。
+            currentViewSettings.columns.forEach(viewCol => {
+                // この列が表示対象でない場合は、次の列の処理に移ります。
+                if (!viewCol.visible) return;
+                // 列のキーに対応するマスター列定義（全列共通の設定情報）を取得します。
+                const masterCol = getMasterColumnDef(viewCol.key);
+                // マスター列定義が見つからない場合は、エラーの可能性があるので処理をスキップします。
+                if (!masterCol) return;
+
+                // 新しいth（テーブルヘッダーセル）要素を作成します。
+                const th = document.createElement('th');
+                // th要素にdata-key属性として列のキーを設定します（デバッグやテスト用）。
+                th.dataset.key = masterCol.key;
+                // マスター列定義にth用のCSSクラスが指定されていれば、それをth要素に適用します。
+                if (masterCol.thClass) th.className = masterCol.thClass;
+                // th要素のテキスト内容として、マスター列定義のデフォルトヘッダーテキストを設定します。
+                th.textContent = masterCol.defaultHeaderText;
+                // 作成したth要素をヘッダー行に追加します。
+                trHead.appendChild(th);
+            });
+
+            // WBSテーブルのtbody（テーブル本体）要素の内容を一旦空にします（再描画のため）。
+            wbsTableBody.innerHTML = '';
+            // 全てのタスクデータ（tasks配列）に対して処理を行います（テーブルの各行を生成）。indexは現在のタスクの配列内インデックスです。
+            tasks.forEach((task, index) => {
+                // 新しいtr（テーブル行）要素をtbodyに追加し、その参照をtrに格納します。
+                const tr = wbsTableBody.insertRow();
+                // tr要素にdata-task-id属性としてタスクのIDを設定します（DOM操作やイベント処理での識別用）。
+                tr.dataset.taskId = task.id;
+
+                // 現在のビュー設定で定義されている各列に対して処理を行います（テーブルの各セルを生成）。
+                currentViewSettings.columns.forEach(viewCol => {
+                    // この列が表示対象でない場合は、次の列の処理に移ります。
+                    if (!viewCol.visible) return;
+                    // 列のキーに対応するマスター列定義を取得します。
+                    const masterCol = getMasterColumnDef(viewCol.key);
+                    // マスター列定義が見つからない場合は、処理をスキップします。
+                    if (!masterCol) return;
+
+                    // 新しいtd（テーブルデータセル）要素を行に追加します。
+                    const td = tr.insertCell();
+                    // マスター列定義にtd用のCSSクラスが指定されていれば、それをtd要素に適用します。
+                    if (masterCol.tdClass) td.className = masterCol.tdClass;
+                    // 現在のタスクオブジェクトから、この列に対応するキーの値を取得します。
+                    const value = task[masterCol.key];
+
+                    // マスター列定義の型(type)に応じて、セルの内容を分岐処理します。
+                    switch (masterCol.type) {
+                        case 'special': // 特殊なセルタイプの場合 (例: 選択チェックボックス、ドラッグハンドル、行番号、WBS IDなど)
+                            if (masterCol.key === 'select') { // 列キーが 'select' (選択チェックボックス) の場合
+                                const cb = document.createElement('input'); // input要素を作成します。
+                                cb.type = 'checkbox'; // inputのタイプをチェックボックスに設定します。
+                                cb.dataset.taskId = task.id; // data-task-id属性にタスクIDを設定します。
+                                cb.checked = selectedTaskIds.has(task.id); // 選択状態セットにタスクIDが含まれていればチェック済みにします。
+                                cb.addEventListener('change', handleSelectionChange); // 変更イベントリスナーを設定します。
+                                td.appendChild(cb); // tdセルにチェックボックスを追加します。
+                            } else if (masterCol.key === 'drag') { // 列キーが 'drag' (ドラッグハンドル) の場合
+                                td.draggable = true; // tdセルをドラッグ可能にします。
+                                // ドラッグ関連のイベントリスナーをこのセルに追加します。
+                                // requestAnimationFrame はドラッグ開始時のクラス適用をスムーズにするために addDragListenersToCell 内で考慮される想定。
+                                addDragListenersToCell(td, task);
+                            } else if (masterCol.key === 'no') { // 列キーが 'no' (行番号) の場合
+                                td.textContent = index + 1; // セルの内容を現在の行インデックス+1 (1始まりの番号) にします。
+                            } else if (masterCol.key === 'wbsId') { // 列キーが 'wbsId' (WBS項番) の場合
+                                td.textContent = task.wbsId || ''; // セルの内容をタスクのWBS ID、またはそれがなければ空文字にします。
+                            }
+                            break; // specialタイプの処理を終了します。
+                        case 'display': // 表示専用のセルタイプの場合 (例: 計算結果のステータスなど)
+                            // getValue関数が定義されていればその実行結果を、なければ対応するタスクの値 (または空文字) を表示します。
+                            td.textContent = masterCol.getValue ? masterCol.getValue(task, index) : (value || '');
+                            break; // displayタイプの処理を終了します。
+                        case 'checkbox': // 編集可能なチェックボックスセルタイプの場合
+                            const chkInp = document.createElement('input'); // input要素を作成します。
+                            chkInp.type = 'checkbox'; // inputのタイプをチェックボックスに設定します。
+                            chkInp.checked = !!task[masterCol.key]; // タスクの該当フィールドの値がtrue的ならチェック済みにします。
+                            chkInp.dataset.field = masterCol.key; // data-field属性に列キーを設定します。
+                            chkInp.dataset.taskId = task.id; // data-task-id属性にタスクIDを設定します。
+                            chkInp.addEventListener('change', handleWbsInputChange); // 変更イベントリスナーを設定します。
+                            td.appendChild(chkInp); // tdセルにチェックボックスを追加します。
+                            break; // checkboxタイプの処理を終了します。
+                        case 'select': // ドロップダウン選択式のセルタイプの場合
+                            const sel = document.createElement('select'); // select要素を作成します。
+                            // マスター列定義のオプション配列があれば、各オプションを生成してselect要素に追加します。
+                            (masterCol.options || []).forEach(optVal => {
+                                const opt = document.createElement('option'); // option要素を作成します。
+                                opt.value = optVal; // optionの値を設定します。
+                                opt.textContent = optVal; // optionの表示テキストを設定します。
+                                sel.appendChild(opt); // select要素にoptionを追加します。
+                            });
+                            // select要素の初期値を設定します。タスクの該当フィールドの値、またはオプションに「未定」があれば「未定」、それもなければ最初のオプション、または空文字。
+                            sel.value = task[masterCol.key] || (masterCol.options && masterCol.options.includes('未定') ? '未定' : (masterCol.options ? masterCol.options[0] : ''));
+                            sel.dataset.field = masterCol.key; // data-field属性に列キーを設定します。
+                            sel.dataset.taskId = task.id; // data-task-id属性にタスクIDを設定します。
+                            sel.addEventListener('change', handleWbsInputChange); // 変更イベントリスナーを設定します。
+                            td.appendChild(sel); // tdセルにselect要素を追加します。
+                            break; // selectタイプの処理を終了します。
+                        case 'text':   // テキスト入力セルタイプの場合
+                        case 'date':   // 日付入力セルタイプの場合
+                        case 'number': // 数値入力セルタイプの場合
+                            const inp = document.createElement('input'); // input要素を作成します。
+                            inp.type = masterCol.type; // inputのタイプをマスター列定義のタイプに設定します。
+                            if (masterCol.type === 'date') { // タイプが日付の場合
+                                inp.value = task[masterCol.key] || ''; // タスクの該当フィールドの値、または空文字を設定します。
+                            } else if (masterCol.type === 'number' && (task[masterCol.key] === null || task[masterCol.key] === undefined)) { // タイプが数値で、値がnullまたはundefinedの場合
+                                inp.value = ''; // 空文字を設定します（placeholder的な意味合い）。
+                            } else { // その他の場合 (text、または値のあるnumber)
+                                // タスクの該当フィールドの値がnullやundefinedの場合も考慮して空文字にする
+                                inp.value = (task[masterCol.key] === null || task[masterCol.key] === undefined) ? '' : task[masterCol.key];
+                            }
+                            if (masterCol.type === 'number') { // タイプが数値の場合、最小値・最大値を設定します。
+                                if (masterCol.min !== undefined) inp.min = masterCol.min; // 最小値が定義されていれば設定します。
+                                if (masterCol.max !== undefined) inp.max = masterCol.max; // 最大値が定義されていれば設定します。
+                                if (masterCol.step !== undefined) inp.step = masterCol.step; // ステップ値が定義されていれば設定します。
+                            }
+                            if (masterCol.key === 'name' && masterCol.indent) { // 列キーが 'name' でインデントが有効な場合
+                                // タスクのレベルに応じて左パディングを設定し、階層構造を表現します。
+                                td.style.paddingLeft = ((task.level - 1) * 20 + 8) + 'px'; // 8pxは基本パディング
+                            }
+                            inp.dataset.field = masterCol.key; // data-field属性に列キーを設定します。
+                            inp.dataset.taskId = task.id; // data-task-id属性にタスクIDを設定します。
+                            inp.addEventListener('change', handleWbsInputChange); // 変更イベントリスナーを設定します。
+                            td.appendChild(inp); // tdセルにinput要素を追加します。
+                            break; // text, date, number タイプの処理を終了します。
+                        default: // 上記いずれのタイプにも一致しない場合 (フォールバック)
+                            td.textContent = task[masterCol.key] || ''; // セルの内容をタスクの該当フィールドの値、または空文字にします。
+                            break; // defaultタイプの処理を終了します。
+                    }
+                });
+
+                // 各行 (tr) にドラッグ＆ドロップ関連のイベントリスナーを設定します (行全体がインジケータの対象)。
+                // 'dragenter': ドラッグ要素がこの行の境界内に入った時に発火します。
+                // 現在の行（tr）に'dragenter'イベント（ドラッグ要素がこの行の境界内に入ったとき）のリスナーを追加します。
+                tr.addEventListener('dragenter', function (e) {
+                    // デフォルトのブラウザの挙動（例えば、ドロップを拒否するアニメーションなど）をキャンセルします。
+                    e.preventDefault();
+                    // ドラッグされているアイテムが現在のタスクアイテム自身である場合、何もしないで処理を終了します。
+                    if (task.id === draggedItemId) return;
+
+                    // もし以前にドラッグオーバー状態になった行（lastDragOverRow）が存在し、それが現在の行（this）と異なる場合、
+                    if (lastDragOverRow && lastDragOverRow !== this) {
+                        // 以前の行の全てのセル（tdとth）からドラッグオーバーを示すCSSクラスを削除します。
+                        lastDragOverRow.querySelectorAll('td, th').forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+                    }
+                    // 現在の行を「最後にドラッグオーバー状態になった行」として記録します。
+                    lastDragOverRow = this;
+
+                    // 現在の行の寸法とビューポートに対する位置を取得します。
+                    const rect = this.getBoundingClientRect();
+                    // マウスカーソルのY座標が、行の上辺から行の高さの半分までの範囲にあるかどうかを判定します（つまり、行の上半分にカーソルがあるか）。
+                    const isOverTopHalf = e.clientY < rect.top + rect.height / 2;
+                    // 現在の行の全てのセル（tdとth）を取得します。thも対象に含めることで、ヘッダー固定時などにも対応できます。
+                    const cells = this.querySelectorAll('td, th');
+
+                    // まず、現在の行の全てのセルから既存のドラッグオーバーインジケータクラスを削除します。
+                    cells.forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+                    // もしカーソルが行の上半分にあれば、
+                    if (isOverTopHalf) {
+                        // 全てのセルに上部へのドラッグオーバーを示すCSSクラスを追加します。
+                        cells.forEach(cell => cell.classList.add('drag-over-indicator-cell-top'));
+                    } else { // そうでなければ（カーソルが行の下半分にあれば）、
+                        // 全てのセルに下部へのドラッグオーバーを示すCSSクラスを追加します。
+                        cells.forEach(cell => cell.classList.add('drag-over-indicator-cell-bottom'));
+                    }
+                });
+
+                // 現在の行（tr）に'dragover'イベント（ドラッグ要素がこの行の上を移動している間、継続的に発生）のリスナーを追加します。
+                tr.addEventListener('dragover', function (e) {
+                    // デフォルトの挙動をキャンセルします。これは'drop'イベントを発生させるために必須です。
+                    e.preventDefault();
+                    // ドロップ操作の種類を'move'（移動）としてカーソルなどでユーザーに示します。
+                    e.dataTransfer.dropEffect = 'move';
+                    // ドラッグされているアイテムが現在のタスクアイテム自身である場合（自分自身の上をドラッグしている場合）、
+                    if (task.id === draggedItemId) {
+                        // この行の全てのセルのドラッグオーバーインジケータを削除します。
+                        this.querySelectorAll('td, th').forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+                        // もしこの行が「最後にドラッグオーバー状態になった行」として記録されていれば、その記録をリセットします。
+                        if (lastDragOverRow === this) lastDragOverRow = null;
+                        // 処理を終了します。
+                        return;
+                    }
+
+                    // 現在の行の寸法とビューポートに対する位置を取得します。
+                    const rect = this.getBoundingClientRect();
+                    // マウスカーソルのY座標に基づいて、行の上半分か下半分かを判定します。
+                    const isOverTopHalf = e.clientY < rect.top + rect.height / 2;
+                    // 現在の行の全てのセル（tdとth）を取得します。
+                    const cells = this.querySelectorAll('td, th');
+
+                    // パフォーマンスのため、クラスの付け替えは必要な場合のみ一度に行います。
+                    // もしカーソルが行の上半分にあれば、
+                    if (isOverTopHalf) {
+                        // 最初のセルにまだ上部インジケータクラスが付いていない場合（つまり状態が変わった場合のみ）、
+                        if (!cells[0].classList.contains('drag-over-indicator-cell-top')) {
+                            // 全てのセルから下部インジケータクラスを削除し、上部インジケータクラスを追加します。
+                            cells.forEach(cell => { cell.classList.remove('drag-over-indicator-cell-bottom'); cell.classList.add('drag-over-indicator-cell-top'); });
+                        }
+                    } else { // そうでなければ（カーソルが行の下半分にあれば）、
+                        // 最初のセルにまだ下部インジケータクラスが付いていない場合（状態が変わった場合のみ）、
+                        if (!cells[0].classList.contains('drag-over-indicator-cell-bottom')) {
+                            // 全てのセルから上部インジケータクラスを削除し、下部インジケータクラスを追加します。
+                            cells.forEach(cell => { cell.classList.remove('drag-over-indicator-cell-top'); cell.classList.add('drag-over-indicator-cell-bottom'); });
+                        }
+                    }
+
+                    // もし「最後にドラッグオーバー状態になった行」が現在の行と異なる場合（つまり、別の行から現在の行にドラッグが移ってきた場合）、
+                    if (lastDragOverRow !== this) {
+                        // 以前にドラッグオーバー状態だった行が存在すれば、
+                        if (lastDragOverRow) {
+                            // その行の全てのセルからドラッグオーバーインジケータクラスを削除します。
+                            lastDragOverRow.querySelectorAll('td, th').forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+                        }
+                        // 現在の行を「最後にドラッグオーバー状態になった行」として更新します。
+                        lastDragOverRow = this;
+                    }
+                });
+
+                // 現在の行（tr）に'dragleave'イベント（ドラッグ要素がこの行の境界外に出たとき）のリスナーを追加します。
+                tr.addEventListener('dragleave', function (e) {
+                    // マウスカーソルがこの行の子要素ではなく、かつこの行が最後にドラッグオーバー状態だった行である場合
+                    // (e.relatedTarget はマウスが出て行った先の要素を指す)
+                    if (!this.contains(e.relatedTarget) && this === lastDragOverRow) {
+                        // この行の全てのセルからドラッグオーバーインジケータクラスを削除します。
+                        this.querySelectorAll('td, th').forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+                        // 「最後にドラッグオーバー状態になった行」の記録をリセットします。
+                        lastDragOverRow = null;
+                    }
+                });
+
+                // 現在の行（tr）に'drop'イベント（ドラッグ要素がこの行上でドロップされたとき）のリスナーを追加します。
+                tr.addEventListener('drop', e => {
+                    // デフォルトの挙動（例: ファイルやURLを開くなど）をキャンセルします。
+                    e.preventDefault();
+                    // ドラッグされたアイテムのIDをデータ転送オブジェクトから取得し、数値に変換します。
+                    const srcId = +e.dataTransfer.getData('text/plain');
+                    // ドロップ先のタスク（現在の行に対応するタスク）のIDを取得します。
+                    const targetId = task.id;
+
+                    // ドロップされた行（e.currentTarget）の全てのセルからドラッグオーバーインジケータクラスを削除します。
+                    e.currentTarget.querySelectorAll('td, th').forEach(cell => cell.classList.remove('drag-over-indicator-cell-top', 'drag-over-indicator-cell-bottom'));
+
+                    // ドラッグ元とドロップ先が同じタスクIDである場合（自分自身へのドロップ）、
+                    if (srcId === targetId) {
+                        // ドラッグ関連のグローバル変数をリセットします。
+                        draggedItemId = null;
+                        lastDragOverRow = null;
+                        // 処理を終了します。
+                        return;
+                    }
+
+                    // ドロップされた行の寸法とビューポートに対する位置を取得します。
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    // マウスカーソルのY座標に基づいて、行の上半分にドロップされたか下半分にドロップされたかを判定します。
+                    const isDroppedOnTopHalf = e.clientY < rect.top + rect.height / 2;
+
+                    // タスクの並び替え処理を実行します。
+                    reorderTask(srcId, targetId, isDroppedOnTopHalf);
+
+                    // ドラッグ関連のグローバル変数をリセットします。
+                    draggedItemId = null;
+                    lastDragOverRow = null;
+                });
+            });
+            // テーブルの全ての行とセルの描画が完了した後、アクションバーのボタンの状態を更新します。
+            updateActionBar();
+        }
+
+        /**
+         * ドラッグ操作に関するイベントリスナーをセルに設定します。
+         * @param {HTMLElement} cell - イベントリスナーを設定するセル要素。
+         * @param {object} task - ドラッグ対象のタスクオブジェクト。
+         */
+        function addDragListenersToCell(cell, task) {
+            /**
+             * ドラッグ開始時の処理。
+             * @param {DragEvent} event - ドラッグイベントオブジェクト。
+             */
+            const handleDragStart = (event) => {
+                draggedItemId = task.id;
+                event.dataTransfer.setData('text/plain', task.id.toString());
+                event.dataTransfer.effectAllowed = 'move';
+
+                const draggedRow = event.currentTarget.closest('tr');
+                if (draggedRow) {
+                    draggedRow.classList.add('dragging');
+                }
+            };
+
+            /**
+             * ドラッグ終了時の処理。
+             * @param {DragEvent} event - ドラッグイベントオブジェクト。
+             */
+            const handleDragEnd = (event) => {
+                const draggedTaskRow = document.querySelector(`tr[data-task-id="${draggedItemId}"]`);
+                if (draggedTaskRow) {
+                    draggedTaskRow.classList.remove('dragging');
+                }
+                clearAllDragOverIndicators(); // ヘルパー関数でインジケーターをクリア
+
+                draggedItemId = null;
+                lastDragOverRow = null;
+            };
+
+            cell.addEventListener('dragstart', handleDragStart);
+            cell.addEventListener('dragend', handleDragEnd);
+        }
+
+        /**
+         * すべての行のドラッグオーバーインジケーターをクリアします。
+         */
+        function clearAllDragOverIndicators() {
+            document.querySelectorAll('#wbsTableBody tr').forEach(row => {
+                row.classList.remove('drag-over-indicator-top', 'drag-over-indicator-bottom');
+            });
+        }
+
+        /**
+         * タスク選択チェックボックスの変更を処理します。
+         * @param {Event} event - イベントオブジェクト。
+         */
+        function handleSelectionChange(event) {
+            const targetCheckbox = event.target;
+            const taskId = +targetCheckbox.dataset.taskId;
+
+            if (targetCheckbox.checked) {
+                selectedTaskIds.add(taskId);
+            } else {
+                selectedTaskIds.delete(taskId);
+            }
+            updateActionBar();
+        }
+
+        /**
+         * アクションバーのボタンの有効/無効状態を更新します。
+         */
+        function updateActionBar() {
+            const numSelected = selectedTaskIds.size;
+            const buttonConfigs = [
+                { id: 'deleteSelected', disabled: numSelected === 0 },
+                { id: 'demoteSelected', disabled: numSelected === 0 },
+                { id: 'promoteSelected', disabled: numSelected === 0 },
+                { id: 'addRowBelow', disabled: numSelected > 1 },
+                // toggleSimpleView ボタンは選択状態に依存しないため、ここでは扱いません。
+            ];
+
+            buttonConfigs.forEach(config => {
+                const button = document.getElementById(config.id);
+                if (button) {
+                    button.disabled = config.disabled;
+                }
+            });
+        }
+
+        /**
+         * 選択されたタスクを削除します。
+         */
+        function deleteSelectedTasks() {
+            const numToDelete = selectedTaskIds.size;
+            if (numToDelete === 0) {
+                // ユーザーにフィードバックが必要な場合はここに追加
+                return;
+            }
+
+            if (!confirm(`選択した ${numToDelete} 件のタスクを削除しますか？`)) {
+                return;
+            }
+
+            tasks = tasks.filter(task => !selectedTaskIds.has(task.id));
+            selectedTaskIds.clear();
+            renderAll();
+        }
+
+        /**
+         * 選択されたタスクのレベルを更新する共通関数。
+         * @param {function(object): number} levelUpdateFn - タスクオブジェクトを受け取り新しいレベルを返す関数。
+         */
+        function updateSelectedTasksLevel(levelUpdateFn) {
+            let changed = false;
+            selectedTaskIds.forEach(id => {
+                const task = tasks.find(t => t.id === id);
+                if (task) {
+                    const oldLevel = task.level;
+                    task.level = levelUpdateFn(task);
+                    if (task.level !== oldLevel) {
+                        changed = true;
+                    }
+                }
+            });
+            if (changed) {
+                renderAll();
+            }
+        }
+
+        /**
+         * 選択されたタスクの項番を一段階下げます（レベルを上げる）。
+         */
+        function demoteSelectedTasks() {
+            updateSelectedTasksLevel(task => Math.min(task.level + 1, MAX_WBS_LEVEL));
+        }
+
+        /**
+         * 選択されたタスクの項番を一段階上げます（レベルを下げる）。
+         */
+        function promoteSelectedTasks() {
+            updateSelectedTasksLevel(task => (task.level > 1 ? task.level - 1 : task.level));
+        }
+
+
+        /**
+         * 新しい行を追加する処理のメイン関数。
+         */
+        function handleAddRowBelow() {
+            const { insertionIndex, newLevel } = determineNewRowInsertionDetails();
+            const newTask = createNewTaskObject(newLevel);
+
+            insertTaskIntoTasksArray(newTask, insertionIndex);
+            updateSelectionForNewTask(newTask.id);
+
+            renderAll(); // 再描画してIDや表示を更新
+            focusOnNewTaskNameInput(newTask.id);
+        }
+
+        /**
+         * 新しい行の挿入位置とレベルを決定します。
+         * @returns {{insertionIndex: number, newLevel: number}} 挿入インデックスと新しいレベル。
+         */
+        function determineNewRowInsertionDetails() {
+            let insertionIndex = tasks.length; // デフォルトは末尾
+            let newLevel = 1; // デフォルトはレベル1
+
+            if (selectedTaskIds.size === 1) {
+                const selectedId = selectedTaskIds.values().next().value;
+                const selectedTask = tasks.find(t => t.id === selectedId);
+                const selectedTaskIndex = selectedTask ? tasks.indexOf(selectedTask) : -1;
+
+                if (selectedTask && selectedTaskIndex !== -1) {
+                    insertionIndex = selectedTaskIndex + 1; // 選択されたタスクの直下
+                    newLevel = selectedTask.level; // 選択されたタスクと同じレベル
+                }
+            }
+            return { insertionIndex, newLevel };
+        }
+
+        /**
+         * 新しいタスクオブジェクトを作成します。
+         * @param {number} level - 新しいタスクのレベル。
+         * @returns {object} 作成されたタスクオブジェクト。
+         */
+        function createNewTaskObject(level) {
+            const newId = nextTaskId++;
+            const today = new Date().toISOString().split('T')[0];
+            // ownerOptions, groupOptions がグローバルスコープに存在することを前提としています
+            return {
+                id: newId,
+                level: level,
+                name: `新規タスク ${newId}`,
+                isInternalTask: false,
+                output: '',
+                remarks: '',
+                plannedStart: today,
+                plannedEnd: today,
+                actualStart: '',
+                actualEnd: '',
+                progress: 0,
+                dependencies: [],
+                owner: ownerOptions[ownerOptions.length - 1], // デフォルト担当者
+                group: groupOptions[groupOptions.length - 1]  // デフォルト担当グループ
+            };
+        }
+
+        /**
+         * タスクをタスク配列の指定された位置に挿入します。
+         * @param {object} task - 挿入するタスクオブジェクト。
+         * @param {number} index - 挿入するインデックス。
+         */
+        function insertTaskIntoTasksArray(task, index) {
+            tasks.splice(index, 0, task);
+        }
+
+        /**
+         * 新しく追加されたタスクを選択状態にします。
+         * @param {number} taskId - 新しく追加されたタスクのID。
+         */
+        function updateSelectionForNewTask(taskId) {
+            selectedTaskIds.clear();
+            selectedTaskIds.add(taskId);
+        }
+
+        /**
+         * 新しく追加されたタスクの項目名入力フィールドにフォーカスします。
+         * @param {number} taskId - フォーカスするタスクのID。
+         */
+        function focusOnNewTaskNameInput(taskId) {
+            // DOMの更新が完了してから要素を検索するために、少し遅延させるか、
+            // renderAll の後に確実に実行されるようにします。
+            // ここでは renderAll が同期的にDOMを更新すると仮定します。
+            const newRowNameInput = wbsTableBody.querySelector(`tr[data-task-id='${taskId}'] input[data-field='name']`);
+            if (newRowNameInput) {
+                newRowNameInput.focus();
+                newRowNameInput.select();
+            }
+        }
+
+
+        /**
+         * タスクの順序を入れ替えます。
+         * @param {number} srcId - 移動元のタスクID。
+         * @param {number} targetTaskId - 移動先のタスクID。
+         * @param {boolean} droppedOnTopHalf - 移動先のタスクの上半分にドロップされたかどうか。
+         */
+        function reorderTask(srcId, targetTaskId, droppedOnTopHalf) {
+            const sourceTask = tasks.find(task => task.id === srcId);
+            if (!sourceTask) {
+                console.warn(`reorderTask: 移動元タスク (ID: ${srcId}) が見つかりません。`);
+                return;
+            }
+
+            const sourceIndex = tasks.indexOf(sourceTask);
+
+            // 配列から移動元タスクを一時的に削除
+            tasks.splice(sourceIndex, 1);
+
+            // 移動元タスク削除後の配列で、移動先タスクのインデックスを再検索
+            let targetIndex = tasks.findIndex(task => task.id === targetTaskId);
+
+            if (targetIndex === -1) {
+                console.warn(`reorderTask: 移動先タスク (ID: ${targetTaskId}) が見つかりません。移動元タスクを元の位置に戻します。`);
+                // 移動先が見つからない場合、移動元タスクを元の位置に戻す
+                tasks.splice(sourceIndex, 0, sourceTask);
+                renderAll(); // 状態を元に戻して再描画
+                return;
+            }
+
+            // ドロップ位置に応じて最終的な挿入インデックスを決定
+            const finalInsertionIndex = droppedOnTopHalf ? targetIndex : targetIndex + 1;
+
+            // 移動元タスクを新しい位置に挿入
+            tasks.splice(finalInsertionIndex, 0, sourceTask);
+            renderAll();
+        }
+
+
+        /**
+         * WBSテーブルの入力値変更を処理します。
+         * @param {Event} event - イベントオブジェクト。
+         */
+        function handleWbsInputChange(event) {
+            const inputElement = event.target;
+            const taskId = +inputElement.dataset.taskId;
+            const fieldKey = inputElement.dataset.field;
+
+            const taskToUpdate = tasks.find(task => task.id === taskId);
+            if (!taskToUpdate) {
+                console.warn(`handleWbsInputChange: タスク (ID: ${taskId}) が見つかりません。`);
+                return;
+            }
+
+            updateTaskField(taskToUpdate, fieldKey, inputElement);
+
+            // ステータスに影響する可能性のあるフィールドが変更された場合は再描画
+            const statusAffectingFields = ['plannedStart', 'plannedEnd', 'actualStart', 'actualEnd', 'progress'];
+            if (statusAffectingFields.includes(fieldKey)) {
+                renderAll();
+            }
+            // 個別のセル更新の最適化も可能ですが、現状は renderAll() に依存
+        }
+
+        /**
+         * 特定のタスクのフィールド値を入力要素に基づいて更新します。
+         * @param {object} task - 更新対象のタスクオブジェクト。
+         * @param {string} fieldKey - 更新対象のフィールドキー。
+         * @param {HTMLInputElement|HTMLSelectElement} inputElement - 値の取得元となる入力要素。
+         */
+        function updateTaskField(task, fieldKey, inputElement) {
+            let newValue;
+            const inputValue = inputElement.value;
+
+            switch (fieldKey) {
+                case 'isInternalTask':
+                    newValue = inputElement.checked;
+                    break;
+                case 'dependencies':
+                    newValue = parseDependenciesString(inputValue, task.id);
+                    break;
+                default: // text, date, number, select などの一般的な入力
+                    if (inputElement.type === 'number') {
+                        newValue = inputValue === '' ? null : +inputValue; // 空の場合はnull、それ以外は数値に変換
+                    } else if (inputElement.type === 'date') {
+                        newValue = inputValue === '' ? null : inputValue; // 空の場合はnull
+                    } else {
+                        newValue = inputValue; // テキストや選択肢
+                    }
+                    break;
+            }
+            task[fieldKey] = newValue;
+        }
+
+        /**
+         * 依存関係の文字列を解析し、数値の配列に変換します。
+         * @param {string} dependenciesString - 解析する依存関係の文字列（例: "1, 2, 3"）。
+         * @param {number} currentTaskId - 現在のタスクID（自己参照を避けるため）。
+         * @returns {number[]} 解析された依存関係IDの配列。
+         */
+        function parseDependenciesString(dependenciesString, currentTaskId) {
+            return dependenciesString
+                .split(',')
+                .map(dep => dep.trim()) // 前後の空白を除去
+                .filter(dep => dep !== '') // 空の文字列を除外
+                .map(dep => +dep) // 数値に変換
+                .filter(depNum => !isNaN(depNum) && depNum !== currentTaskId && depNum > 0); // 有効な数値、自己参照でない、0より大きい
+        }
+        function renderAll() {
+            regenerateWbsIds();
+            renderWbsTable();
+            updateActionBar();
+            updateDateInputsClass();
+            renderGanttChart();
+        }
+
+        // --- ① ヘルパー関数：日付入力の初期文字色を設定 ---
+        function updateDateInputsClass() {
+            document.querySelectorAll('input[type="date"]').forEach(input => {
+                input.classList.toggle('has-value', !!input.value);
+            });
+        }
+
+        // --- ③ イベントデリゲーションでフォーカス／ブラーをハンドリング ---
+        document.addEventListener('focusin', event => {
+            if (event.target.matches('input[type="date"]')) {
+                event.target.style.color = 'black';
+            }
+        });
+        document.addEventListener('input', e => {
+            if (e.target.matches('input[type="date"]')) {
+                e.target.classList.toggle('has-value', !!e.target.value);
+            }
+        });
+        document.addEventListener('change', e => {
+            if (e.target.matches('input[type="date"]')) {
+                e.target.classList.toggle('has-value', !!e.target.value);
+            }
+        });
+
+        //------------------------------------------------------------------------------------------------------------------------------------------------
+        // --- ガントチャート関連 (変更なし、ただしrenderAllで呼ばれる) ---
+        //------------------------------------------------------------------------------------------------------------------------------------------------
+        let viewMode = 'planned';
+        let ganttZoomLevel = 20;
+        const GANTT_ROW_HEIGHT = 30;
+        const GANTT_BAR_HEIGHT = 20;
+        const GANTT_HEADER_HEIGHT = 50;
+        const GANTT_PADDING_LEFT = 10;
+
+        function renderGanttChart() {
+            ganttSvg.innerHTML = '';
+            const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+            defs.innerHTML = `<marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#6b7280"/></marker>`;
+            ganttSvg.appendChild(defs);
+
+            if (tasks.length === 0) {
+                ganttSvg.setAttribute('height', GANTT_HEADER_HEIGHT);
+                return;
+            }
+            // sortTasks(); // renderAllで呼ばれる
+
+            const { chartStartDate, chartEndDate, totalDays } = calculateGanttDimensions();
+            if (totalDays <= 0) {
+                ganttSvg.setAttribute('height', GANTT_HEADER_HEIGHT);
+                return;
+            }
+
+            const chartWidth = totalDays * ganttZoomLevel + GANTT_PADDING_LEFT * 2;
+            const chartHeight = tasks.length * GANTT_ROW_HEIGHT + GANTT_HEADER_HEIGHT;
+
+            ganttSvg.setAttribute('width', chartWidth);
+            ganttSvg.setAttribute('height', chartHeight);
+
+            renderGanttDateHeader(chartStartDate, totalDays);
+            renderGanttGridLines(totalDays, chartHeight);
+
+            tasks.forEach((task, index) => {
+                renderGanttTaskRow(task, index, chartStartDate, totalDays);
+            });
+            renderDependencyLines(chartStartDate);
+        }
+
+        function calculateGanttDimensions() {
+            if (tasks.length === 0) return { chartStartDate: new Date(), chartEndDate: new Date(), totalDays: 0 };
+
+            const allDates = [];
+            tasks.forEach(t => {
+                if (t.plannedStart && isValidDate(new Date(t.plannedStart))) allDates.push(new Date(t.plannedStart));
+                if (t.plannedEnd && isValidDate(new Date(t.plannedEnd))) allDates.push(new Date(t.plannedEnd));
+                if (t.actualStart && isValidDate(new Date(t.actualStart))) allDates.push(new Date(t.actualStart));
+                if (t.actualEnd && isValidDate(new Date(t.actualEnd))) allDates.push(new Date(t.actualEnd));
+            });
+
+            if (allDates.length === 0) {
+                const today = new Date();
+                const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                return { chartStartDate: monthStart, chartEndDate: monthEnd, totalDays: daysBetween(monthStart, monthEnd) + 1 };
+            }
+
+            let minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+            let maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
+
+            minDate.setDate(minDate.getDate() - 3);
+            maxDate.setDate(maxDate.getDate() + 7);
+
+            const totalDays = daysBetween(minDate, maxDate) + 1;
+            return { chartStartDate: minDate, chartEndDate: maxDate, totalDays };
+        }
+
+        function isValidDate(d) {
+            return d instanceof Date && !isNaN(d.getTime());
+        }
+
+        function renderGanttDateHeader(startDate, totalDays) {
+            const headerGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            headerGroup.setAttribute('transform', `translate(${GANTT_PADDING_LEFT}, 0)`);
+            let currentMonth = -1;
+            let monthStartX = 0;
+            let currentYear = -1;
+
+            for (let i = 0; i < totalDays; i++) {
+                const date = new Date(startDate);
+                date.setDate(startDate.getDate() + i);
+                const month = date.getMonth();
+                const year = date.getFullYear();
+
+                if (month !== currentMonth || year !== currentYear) {
+                    if (currentMonth !== -1) {
+                        const monthRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                        monthRect.setAttribute('x', monthStartX);
+                        monthRect.setAttribute('y', 0);
+                        monthRect.setAttribute('width', (i * ganttZoomLevel) - monthStartX);
+                        monthRect.setAttribute('height', GANTT_HEADER_HEIGHT / 2);
+                        monthRect.setAttribute('fill', '#f9fafb');
+                        monthRect.classList.add('month-header-cell');
+                        headerGroup.appendChild(monthRect);
+
+                        const monthText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                        monthText.setAttribute('x', monthStartX + ((i * ganttZoomLevel) - monthStartX) / 2);
+                        monthText.setAttribute('y', GANTT_HEADER_HEIGHT / 4 + 5);
+                        monthText.setAttribute('text-anchor', 'middle');
+                        monthText.setAttribute('font-size', '11px');
+                        monthText.textContent = `${currentYear}年 ${new Date(currentYear, currentMonth).toLocaleString('ja-JP', { month: 'short' })}`;
+                        headerGroup.appendChild(monthText);
+                    }
+                    currentMonth = month;
+                    currentYear = year;
+                    monthStartX = i * ganttZoomLevel;
+                }
+            }
+            if (currentMonth !== -1) {
+                const lastMonthRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                lastMonthRect.setAttribute('x', monthStartX);
+                lastMonthRect.setAttribute('y', 0);
+                lastMonthRect.setAttribute('width', (totalDays * ganttZoomLevel) - monthStartX);
+                lastMonthRect.setAttribute('height', GANTT_HEADER_HEIGHT / 2);
+                lastMonthRect.setAttribute('fill', '#f9fafb');
+                lastMonthRect.classList.add('month-header-cell');
+                headerGroup.appendChild(lastMonthRect);
+                const lastMonthText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                lastMonthText.setAttribute('x', monthStartX + ((totalDays * ganttZoomLevel) - monthStartX) / 2);
+                lastMonthText.setAttribute('y', GANTT_HEADER_HEIGHT / 4 + 5);
+                lastMonthText.setAttribute('text-anchor', 'middle');
+                lastMonthText.setAttribute('font-size', '11px');
+                lastMonthText.textContent = `${currentYear}年 ${new Date(currentYear, currentMonth).toLocaleString('ja-JP', { month: 'short' })}`;
+                headerGroup.appendChild(lastMonthText);
+            }
+
+            for (let i = 0; i < totalDays; i++) {
+                const date = new Date(startDate);
+                date.setDate(startDate.getDate() + i);
+                const dayRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                dayRect.setAttribute('x', i * ganttZoomLevel);
+                dayRect.setAttribute('y', GANTT_HEADER_HEIGHT / 2);
+                dayRect.setAttribute('width', ganttZoomLevel);
+                dayRect.setAttribute('height', GANTT_HEADER_HEIGHT / 2);
+                dayRect.setAttribute('fill', (date.getDay() === 0 || date.getDay() === 6) ? '#fef2f2' : '#fff');
+                dayRect.classList.add('date-header-cell');
+                headerGroup.appendChild(dayRect);
+                const dayText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                dayText.setAttribute('x', i * ganttZoomLevel + ganttZoomLevel / 2);
+                dayText.setAttribute('y', GANTT_HEADER_HEIGHT * 0.75 + 3);
+                dayText.setAttribute('text-anchor', 'middle');
+                dayText.setAttribute('font-size', '10px');
+                dayText.textContent = date.getDate();
+                headerGroup.appendChild(dayText);
+            }
+            ganttSvg.appendChild(headerGroup);
+        }
+
+        function renderGanttGridLines(totalDays, chartHeight) {
+            const gridGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            gridGroup.setAttribute('transform', `translate(${GANTT_PADDING_LEFT}, 0)`);
+            for (let i = 0; i <= totalDays; i++) {
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute('x1', i * ganttZoomLevel);
+                line.setAttribute('y1', GANTT_HEADER_HEIGHT);
+                line.setAttribute('x2', i * ganttZoomLevel);
+                line.setAttribute('y2', chartHeight);
+                line.classList.add('grid-line');
+                gridGroup.appendChild(line);
+            }
+            tasks.forEach((task, index) => {
+                const y = GANTT_HEADER_HEIGHT + (index + 1) * GANTT_ROW_HEIGHT;
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute('x1', 0);
+                line.setAttribute('y1', y);
+                line.setAttribute('x2', totalDays * ganttZoomLevel);
+                line.setAttribute('y2', y);
+                line.classList.add('grid-line');
+                gridGroup.appendChild(line);
+            });
+            ganttSvg.appendChild(gridGroup);
+        }
+
+        function renderGanttTaskRow(task, index, chartStartDate, totalChartDays) {
+            const taskGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            taskGroup.classList.add('task-row-group');
+            taskGroup.dataset.taskId = task.id;
+            taskGroup.setAttribute('transform', `translate(${GANTT_PADDING_LEFT}, ${GANTT_HEADER_HEIGHT + index * GANTT_ROW_HEIGHT})`);
+
+            const startDateStr = viewMode === 'planned' ? task.plannedStart : task.actualStart;
+            const endDateStr = viewMode === 'planned' ? task.plannedEnd : task.actualEnd;
+            const barClass = viewMode === 'planned' ? 'task-bar-planned' : 'task-bar-actual';
+
+            if (startDateStr && endDateStr && isValidDate(new Date(startDateStr)) && isValidDate(new Date(endDateStr))) {
+                const startDate = new Date(startDateStr);
+                const endDate = new Date(endDateStr);
+
+                if (startDate <= endDate) {
+                    const taskStartOffsetDays = daysBetween(chartStartDate, startDate);
+                    const taskDurationDays = daysBetween(startDate, endDate) + 1;
+
+                    const barActualFullWidth = taskDurationDays * ganttZoomLevel;
+                    const barRenderXInChart = taskStartOffsetDays * ganttZoomLevel;
+
+                    const chartVisibleAreaStartX = 0;
+                    const chartVisibleAreaEndX = totalChartDays * ganttZoomLevel;
+
+                    const visibleBarStartXInChart = Math.max(barRenderXInChart, chartVisibleAreaStartX);
+                    const visibleBarEndXInChart = Math.min(barRenderXInChart + barActualFullWidth, chartVisibleAreaEndX);
+
+                    const barVisibleWidth = Math.max(0, visibleBarEndXInChart - visibleBarStartXInChart);
+                    const barSvgX = visibleBarStartXInChart;
+
+
+                    if (barVisibleWidth > 0) {
+                        const barY = (GANTT_ROW_HEIGHT - GANTT_BAR_HEIGHT) / 2;
+
+                        const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                        bar.setAttribute('x', barSvgX);
+                        bar.setAttribute('y', barY);
+                        bar.setAttribute('width', barVisibleWidth);
+                        bar.setAttribute('height', GANTT_BAR_HEIGHT);
+                        bar.setAttribute('rx', 3);
+                        bar.classList.add(barClass, 'task-bar-group');
+                        taskGroup.appendChild(bar);
+
+                        if (task.progress > 0 && (viewMode === 'planned' || (viewMode === 'actual' && !task.actualStart))) {
+                            const progressActualWidth = barActualFullWidth * (task.progress / 100);
+                            const visibleProgressStartX = Math.max(barRenderXInChart, chartVisibleAreaStartX);
+                            const visibleProgressEndX = Math.min(barRenderXInChart + progressActualWidth, chartVisibleAreaEndX);
+                            const progressVisibleWidth = Math.max(0, visibleProgressEndX - visibleProgressStartX);
+                            const progressSvgX = visibleProgressStartX;
+
+                            if (progressVisibleWidth > 0) {
+                                const progressBar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                                progressBar.setAttribute('x', progressSvgX);
+                                progressBar.setAttribute('y', barY);
+                                progressBar.setAttribute('width', progressVisibleWidth);
+                                progressBar.setAttribute('height', GANTT_BAR_HEIGHT);
+                                progressBar.setAttribute('rx', 3);
+                                progressBar.classList.add('task-bar-progress');
+                                taskGroup.appendChild(progressBar);
+                            }
+                        }
+
+                        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                        const labelX = barRenderXInChart + barActualFullWidth / 2;
+                        if (labelX >= visibleBarStartXInChart && labelX <= visibleBarEndXInChart && barVisibleWidth > 40) {
+                            label.setAttribute('x', labelX);
+                            label.setAttribute('y', barY + GANTT_BAR_HEIGHT / 2);
+                            label.classList.add('task-label');
+                            label.textContent = `${task.name} (${task.progress}%)`;
+                            taskGroup.appendChild(label);
+                        }
+
+                        const leftHandleX = barRenderXInChart;
+                        const rightHandleX = barRenderXInChart + barActualFullWidth - 5;
+
+                        if (leftHandleX < chartVisibleAreaEndX && leftHandleX + 5 > chartVisibleAreaStartX) {
+                            const leftHandle = createResizeHandle(leftHandleX, barY, task.id, 'left');
+                            taskGroup.appendChild(leftHandle);
+                        }
+                        if (rightHandleX < chartVisibleAreaEndX && rightHandleX + 5 > chartVisibleAreaStartX) {
+                            const rightHandle = createResizeHandle(rightHandleX, barY, task.id, 'right');
+                            taskGroup.appendChild(rightHandle);
+                        }
+
+                        bar.addEventListener('mousedown', (e) => handleBarDragStart(e, task.id, chartStartDate));
+                    }
+                }
+            }
+            ganttSvg.appendChild(taskGroup);
+        }
+
+        function createResizeHandle(x, y, taskId, side) {
+            const handle = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            handle.setAttribute('x', x);
+            handle.setAttribute('y', y);
+            handle.setAttribute('width', 5);
+            handle.setAttribute('height', GANTT_BAR_HEIGHT);
+            handle.classList.add('resize-handle');
+            handle.dataset.taskId = taskId;
+            handle.dataset.side = side;
+            handle.addEventListener('mousedown', (e) => handleBarResizeStart(e, taskId, side, calculateGanttDimensions().chartStartDate));
+            return handle;
+        }
+
+        let dragInfo = {};
+        function handleBarDragStart(event, taskId, chartStartDate) {
+            event.preventDefault();
+            event.stopPropagation();
+            selectRowHighlight(taskId, true);
+
+            const task = getTaskById(taskId);
+            if (!task) return;
+            const targetBar = event.currentTarget;
+            const taskGroup = targetBar.closest('.task-row-group');
+
+            const startDateField = viewMode === 'planned' ? 'plannedStart' : 'actualStart';
+            const endDateField = viewMode === 'planned' ? 'plannedEnd' : 'actualEnd';
+            if (!task[startDateField] || !task[endDateField] || !isValidDate(new Date(task[startDateField])) || !isValidDate(new Date(task[endDateField]))) return;
+
+            dragInfo = {
+                task: task,
+                targetBar: targetBar,
+                taskGroup: taskGroup,
+                chartStartDate: chartStartDate,
+                initialMouseX: event.clientX,
+                initialTaskStartOffsetDays: daysBetween(chartStartDate, new Date(task[startDateField])),
+                startDateField: startDateField,
+                endDateField: endDateField,
+                originalDurationDays: daysBetween(new Date(task[startDateField]), new Date(task[endDateField])),
+            };
+
+            document.addEventListener('mousemove', handleBarDragMove);
+            document.addEventListener('mouseup', handleBarDragEnd);
+        }
+
+        function handleBarDragMove(event) {
+            if (!dragInfo.task) return;
+            const dx = event.clientX - dragInfo.initialMouseX;
+            const newStartOffsetDays = dragInfo.initialTaskStartOffsetDays + Math.round(dx / ganttZoomLevel);
+
+            const newStartDate = new Date(dragInfo.chartStartDate);
+            newStartDate.setDate(dragInfo.chartStartDate.getDate() + newStartOffsetDays);
+            const newEndDate = new Date(newStartDate);
+            newEndDate.setDate(newStartDate.getDate() + dragInfo.originalDurationDays);
+
+            dragInfo.task[dragInfo.startDateField] = newStartDate.toISOString().split('T')[0];
+            dragInfo.task[dragInfo.endDateField] = newEndDate.toISOString().split('T')[0];
+
+            updateWbsRowFields(dragInfo.task.id, {
+                [dragInfo.startDateField]: dragInfo.task[dragInfo.startDateField],
+                [dragInfo.endDateField]: dragInfo.task[dragInfo.endDateField]
+            });
+            // ドラッグ中はガントチャートの該当行のみ再描画（パフォーマンスのため）
+            const taskIndex = tasks.findIndex(t => t.id === dragInfo.task.id);
+            if (taskIndex !== -1) {
+                // 既存のタスクグループを一旦削除
+                const existingGroup = ganttSvg.querySelector(`.task-row-group[data-task-id="${dragInfo.task.id}"]`);
+                if (existingGroup) existingGroup.remove();
+                // 新しい情報で再描画
+                renderGanttTaskRow(dragInfo.task, taskIndex, dragInfo.chartStartDate, calculateGanttDimensions().totalDays);
+                renderDependencyLines(dragInfo.chartStartDate); // 依存線も更新
+            }
+        }
+        function handleBarDragEnd(event) {
+            document.removeEventListener('mousemove', handleBarDragMove);
+            document.removeEventListener('mouseup', handleBarDragEnd);
+            if (dragInfo.task) {
+                selectRowHighlight(dragInfo.task.id, false);
+                renderAll();
+            }
+            dragInfo = {};
+        }
+
+        let resizeInfo = {};
+        function handleBarResizeStart(event, taskId, side, chartStartDate) {
+            event.preventDefault();
+            event.stopPropagation();
+            selectRowHighlight(taskId, true);
+
+            const task = getTaskById(taskId);
+            if (!task) return;
+            const targetHandle = event.currentTarget;
+            const taskGroup = targetHandle.closest('.task-row-group');
+            const bar = taskGroup.querySelector(viewMode === 'planned' ? '.task-bar-planned' : '.task-bar-actual');
+            if (!bar) return;
+
+            const startDateField = viewMode === 'planned' ? 'plannedStart' : 'actualStart';
+            const endDateField = viewMode === 'planned' ? 'plannedEnd' : 'actualEnd';
+            if (!task[startDateField] || !task[endDateField] || !isValidDate(new Date(task[startDateField])) || !isValidDate(new Date(task[endDateField]))) return;
+
+            resizeInfo = {
+                task: task,
+                bar: bar,
+                taskGroup: taskGroup,
+                side: side,
+                chartStartDate: chartStartDate,
+                initialMouseX: event.clientX,
+                initialTaskStartDate: new Date(task[startDateField]),
+                initialTaskEndDate: new Date(task[endDateField]),
+                startDateField: startDateField,
+                endDateField: endDateField,
+            };
+
+            document.addEventListener('mousemove', handleBarResizeMove);
+            document.addEventListener('mouseup', handleBarResizeEnd);
+        }
+        function handleBarResizeMove(event) {
+            if (!resizeInfo.task) return;
+            const dxDays = Math.round((event.clientX - resizeInfo.initialMouseX) / ganttZoomLevel);
+            let newStartDate = new Date(resizeInfo.initialTaskStartDate);
+            let newEndDate = new Date(resizeInfo.initialTaskEndDate);
+
+            if (resizeInfo.side === 'left') {
+                newStartDate.setDate(resizeInfo.initialTaskStartDate.getDate() + dxDays);
+                if (newStartDate > newEndDate) newStartDate = new Date(newEndDate);
+            } else {
+                newEndDate.setDate(resizeInfo.initialTaskEndDate.getDate() + dxDays);
+                if (newEndDate < newStartDate) newEndDate = new Date(newStartDate);
+            }
+
+            resizeInfo.task[resizeInfo.startDateField] = newStartDate.toISOString().split('T')[0];
+            resizeInfo.task[resizeInfo.endDateField] = newEndDate.toISOString().split('T')[0];
+
+            updateWbsRowFields(resizeInfo.task.id, {
+                [resizeInfo.startDateField]: resizeInfo.task[resizeInfo.startDateField],
+                [resizeInfo.endDateField]: resizeInfo.task[resizeInfo.endDateField]
+            });
+            const taskIndex = tasks.findIndex(t => t.id === resizeInfo.task.id);
+            if (taskIndex !== -1) {
+                const existingGroup = ganttSvg.querySelector(`.task-row-group[data-task-id="${resizeInfo.task.id}"]`);
+                if (existingGroup) existingGroup.remove();
+                renderGanttTaskRow(resizeInfo.task, taskIndex, resizeInfo.chartStartDate, calculateGanttDimensions().totalDays);
+                renderDependencyLines(resizeInfo.chartStartDate);
+            }
+        }
+        function handleBarResizeEnd(event) {
+            document.removeEventListener('mousemove', handleBarResizeMove);
+            document.removeEventListener('mouseup', handleBarResizeEnd);
+            if (resizeInfo.task) {
+                selectRowHighlight(resizeInfo.task.id, false);
+                renderAll();
+            }
+            resizeInfo = {};
+        }
+
+        function updateWbsRowFields(taskId, fieldsToUpdate) {
+            const wbsRow = wbsTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
+            if (!wbsRow) return;
+            for (const field in fieldsToUpdate) {
+                const input = wbsRow.querySelector(`input[data-field="${field}"]`);
+                if (input) input.value = fieldsToUpdate[field];
+            }
+        }
+
+        function renderDependencyLines(chartStartDate) {
+            const existingLines = ganttSvg.querySelectorAll('.dependency-line');
+            existingLines.forEach(line => line.remove());
+
+            tasks.forEach((task, taskIndex) => {
+                if (task.dependencies && task.dependencies.length > 0) {
+                    task.dependencies.forEach(depId => {
+                        const dependentTask = getTaskById(depId);
+                        if (dependentTask) {
+                            const startTask = dependentTask;
+                            const endTask = task;
+                            const startIndex = tasks.findIndex(t => t.id === startTask.id);
+                            const endIndex = tasks.findIndex(t => t.id === endTask.id);
+                            if (startIndex === -1 || endIndex === -1) return;
+
+                            const startBarInfo = getBarInfo(startTask, chartStartDate, startIndex);
+                            const endBarInfo = getBarInfo(endTask, chartStartDate, endIndex);
+
+                            if (startBarInfo && endBarInfo && startBarInfo.width > 0 && endBarInfo.width > 0) {
+                                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                                line.setAttribute('x1', GANTT_PADDING_LEFT + startBarInfo.x + startBarInfo.width);
+                                line.setAttribute('y1', GANTT_HEADER_HEIGHT + startBarInfo.rowIndex * GANTT_ROW_HEIGHT + GANTT_ROW_HEIGHT / 2);
+                                line.setAttribute('x2', GANTT_PADDING_LEFT + endBarInfo.x);
+                                line.setAttribute('y2', GANTT_HEADER_HEIGHT + endBarInfo.rowIndex * GANTT_ROW_HEIGHT + GANTT_ROW_HEIGHT / 2);
+                                line.classList.add('dependency-line');
+                                ganttSvg.appendChild(line);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        function getBarInfo(task, chartStartDate, rowIndex) {
+            const startDateStr = viewMode === 'planned' ? task.plannedStart : task.actualStart;
+            const endDateStr = viewMode === 'planned' ? task.plannedEnd : task.actualEnd;
+            if (!startDateStr || !endDateStr || !isValidDate(new Date(startDateStr)) || !isValidDate(new Date(endDateStr))) return null;
+
+            const startDate = new Date(startDateStr);
+            const endDate = new Date(endDateStr);
+            if (startDate > endDate) return null;
+
+            const taskStartOffsetDays = daysBetween(chartStartDate, startDate);
+            const taskDurationDays = daysBetween(startDate, endDate) + 1;
+            if (taskDurationDays <= 0) return null;
+
+            const theoreticalX = taskStartOffsetDays * ganttZoomLevel;
+            const theoreticalWidth = taskDurationDays * ganttZoomLevel;
+
+            return {
+                x: theoreticalX,
+                width: theoreticalWidth,
+                rowIndex: rowIndex
+            };
+        }
+
+        function handleModeToggle() {
+            viewMode = viewMode === 'planned' ? 'actual' : 'planned';
+            modeToggle.classList.toggle('toggle-on', viewMode === 'actual');
+            const labels = modeToggle.querySelectorAll('.toggle-label');
+            labels[0].classList.toggle('active', viewMode === 'planned');
+            labels[1].classList.toggle('active', viewMode === 'actual');
+            renderGanttChart();
+            renderMinimap();
+        }
+
+        function daysBetween(date1, date2) {
+            // getTimezoneOffsetを考慮しないシンプルな日付差計算
+            const d1UTC = Date.UTC(date1.getFullYear(), date1.getMonth(), date1.getDate());
+            const d2UTC = Date.UTC(date2.getFullYear(), date2.getMonth(), date2.getDate());
+            return Math.floor((d2UTC - d1UTC) / (1000 * 60 * 60 * 24));
+        }
+
+        function getTaskById(id) {
+            return tasks.find(task => task.id === id);
+        }
+
+        function selectRowHighlight(taskId, isSelected) {
+            wbsTableBody.querySelectorAll('tr').forEach(row => row.classList.remove('row-selected'));
+            if (isSelected) {
+                const wbsRow = wbsTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
+                if (wbsRow) wbsRow.classList.add('row-selected');
+            }
+        }
+    </script>
+</body>
+
+</html>
